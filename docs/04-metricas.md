@@ -53,10 +53,10 @@ Crie testes simples para validar seu agente:
 Após os testes, registre suas conclusões:
 
 **O que funcionou bem:**
-- [Liste aqui]
+- A migração para a API do Gemini 1.5 Flash eliminou os erros de conexão e o tempo de processamento excessivo, garantindo que o agente responda em tempo real.
 
 **O que pode melhorar:**
-- [Liste aqui]
+- Integrar métricas avançadas, como o monitoramento de consumo de tokens e latência exata, utilizando ferramentas como LangFuse para controle de custos da API.
 
 ---
 
