@@ -12,8 +12,7 @@ import google.generativeai as genai
 GOOGLE_API_KEY = "SUA_CHAVE_API_AQUI" 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# --- PROTEÇÃO CONTRA ERRO 404 ---
-# Esta função encontra automaticamente um modelo que funcione na sua conta
+# Esta função encontra automaticamente um modelo que funcione
 def encontrar_modelo_disponivel():
     try:
         print(">>> Buscando modelos disponíveis na sua conta...")
