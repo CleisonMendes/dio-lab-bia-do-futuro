@@ -96,4 +96,3 @@ if pergunta := st.chat_input("Dúvida sobre finanças..."):
         resposta = perguntar(pergunta)
         st.chat_message("assistant").write(resposta)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
-
