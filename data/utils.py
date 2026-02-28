@@ -1,83 +1,99 @@
-"""
-Utilitário para carregar os dados mockados do agente financeiro.
-Use este módulo para integrar os dados ao seu agente.
-"""
-
 import json
-from pathlib import Path
+import pandas as pd
+import os
+import streamlit as st
+import google.generativeai as genai
 
-# Caminho base dos dados
-DATA_PATH = Path(__file__).parent
+# ************ CONFIGURAÇÃO GEMINI ************
+# Sua chave de API
+GOOGLE_API_KEY = "SUA_CHAVE_API_AQUI" 
+genai.configure(api_key=GOOGLE_API_KEY)
 
-def carregar_transacoes():
-    """Carrega o histórico de transações do cliente."""
-    with open(DATA_PATH / "transacoes.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+# --- PROTEÇÃO CONTRA ERRO 404 ---
+# Esta função encontra automaticamente um modelo que funcione na sua conta
+def encontrar_modelo_disponivel():
+    try:
+        print(">>> Buscando modelos disponíveis na sua conta...")
+        for m in genai.list_models():
+            # Procura por modelos que geram texto (Flash ou Pro)
+            if 'generateContent' in m.supported_generation_methods:
+                if 'flash' in m.name: # Prioridade para o Flash (mais rápido)
+                    print(f">>> Modelo encontrado e selecionado: {m.name}")
+                    return m.name
+        # Se não achar Flash, usa o padrãozão Gemini Pro
+        return "models/gemini-pro"
+    except Exception as e:
+        print(f"Erro ao listar modelos: {e}")
+        return "models/gemini-pro" # Fallback de segurança
 
-def carregar_perfil():
-    """Carrega o perfil do investidor."""
-    with open(DATA_PATH / "perfil_investidor.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+# Define o modelo automaticamente sem dar erro 404
+MODELO_ESCOLHIDO = encontrar_modelo_disponivel()
+model = genai.GenerativeModel(MODELO_ESCOLHIDO)
 
-def carregar_produtos():
-    """Carrega os produtos financeiros disponíveis."""
-    with open(DATA_PATH / "produtos_financeiros.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+# ************ CONFIGURAÇÃO DE PASTAS ************
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, '..', 'data')
 
-def carregar_todos():
-    """Carrega todos os dados de uma vez."""
-    return {
-        "transacoes": carregar_transacoes(),
-        "perfil": carregar_perfil(),
-        "produtos": carregar_produtos()
-    }
+# ************ CARREGAR DADOS ************
+try:
+    perfil = json.load(open(os.path.join(DATA_DIR, 'perfil_investidor.json'), 'r', encoding='utf-8'))
+    produtos = json.load(open(os.path.join(DATA_DIR, 'produtos_financeiros.json'), 'r', encoding='utf-8'))
+    transacoes = pd.read_csv(os.path.join(DATA_DIR, 'transacoes.csv'), encoding='utf-8')
+    historico = pd.read_csv(os.path.join(DATA_DIR, 'historico_atendimento.csv'), encoding='utf-8')
+except Exception as e:
+    st.error(f"Erro crítico ao carregar arquivos: {e}")
+    st.stop()
 
-def formatar_contexto_para_prompt(dados=None):
-    """
-    Formata os dados em texto para incluir no prompt do agente.
-    Útil para criar o contexto que será enviado à LLM.
-    """
-    if dados is None:
-        dados = carregar_todos()
-    
-    perfil = dados["perfil"]
-    transacoes = dados["transacoes"]
-    
-    contexto = f"""
-DADOS DO CLIENTE:
-- Nome: {perfil["dados_pessoais"]["nome"]}
-- Idade: {perfil["dados_pessoais"]["idade"]} anos
-- Profissão: {perfil["dados_pessoais"]["profissao"]}
-- Renda Mensal: R$ {perfil["dados_pessoais"]["renda_mensal"]:,.2f}
+# ************ CONTEXTO E PROMPT ************
+contexto = f"""
+PERFIL DO CLIENTE:
+Nome: {perfil['nome']} | Idade: {perfil['idade']}
+Perfil: {perfil['perfil_investidor']} | Objetivo: {perfil['objetivo_principal']}
+Patrimônio: R$ {perfil['patrimonio_total']} | Reserva: R$ {perfil['reserva_emergencia_atual']}
 
-PERFIL DE INVESTIDOR:
-- Tipo: {perfil["perfil_investidor"]["tipo"]}
-- Tolerância a risco: {perfil["perfil_investidor"]["tolerancia_risco"]}
-- Horizonte: {perfil["perfil_investidor"]["horizonte_investimento"]}
-- Objetivo: {perfil["perfil_investidor"]["objetivo_principal"]}
+HISTÓRICO RECENTE:
+{transacoes.tail(5).to_string(index=False)}
 
-SITUAÇÃO FINANCEIRA:
-- Patrimônio Total: R$ {perfil["situacao_financeira"]["patrimonio_total"]:,.2f}
-- Reserva de Emergência: R$ {perfil["situacao_financeira"]["reserva_emergencia"]:,.2f}
-- Saldo em Conta: R$ {transacoes["saldo_atual"]:,.2f}
-
-GASTOS DO MÊS (por categoria):
+PRODUTOS:
+{json.dumps(produtos, indent=2, ensure_ascii=False)}
 """
-    for categoria, valor in transacoes["resumo_por_categoria"].items():
-        if categoria != "receita":
-            contexto += f"- {categoria.title()}: R$ {valor:,.2f}\n"
-    
-    return contexto
 
+SYSTEM_PROMPT = """PERSONA: Sophia, educadora financeira objetiva.
+OBJETIVO: Tirar dúvidas em APENAS 1 PARÁGRAFO CURTO (estilo mensagem de WhatsApp).
 
-# Exemplo de uso
-if __name__ == "__main__":
-    print("=== Teste de carregamento dos dados ===\n")
-    
-    dados = carregar_todos()
-    print(f"✓ Transações carregadas: {len(dados['transacoes']['transacoes'])} registros")
-    print(f"✓ Perfil carregado: {dados['perfil']['dados_pessoais']['nome']}")
-    print(f"✓ Produtos carregados: {len(dados['produtos']['produtos'])} produtos")
-    
-    print("\n=== Contexto formatado para prompt ===\n")
-    print(formatar_contexto_para_prompt(dados))
+REGRAS RÍGIDAS:
+1. MÁXIMO DE 50 PALAVRAS. Seja extremamente concisa.
+2. Use o saldo do cliente para exemplificar.
+3. Sem introduções como "Olá", "Claro", "Entendi". Vá direto à resposta.
+4. Se perguntarem "O que é", dê a definição e um exemplo com o dinheiro dele. Fim.
+"""
+
+# ************ FUNÇÃO DE PERGUNTA ************
+def perguntar(msg):
+    prompt_final = f"{SYSTEM_PROMPT}\n\nDADOS DO CLIENTE:\n{contexto}\n\nPERGUNTA: {msg}"
+    try:
+        response = model.generate_content(prompt_final)
+        return response.text if response.text else "Erro: Resposta vazia."
+    except Exception as e:
+        return f"Erro na conexão ({MODELO_ESCOLHIDO}): {e}"
+
+# ============ INTERFACE ============
+st.set_page_config(page_title="Sophia Finanças", page_icon="💰")
+st.title("🎓 Sophia, Sua Educadora Financeira")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if pergunta := st.chat_input("Dúvida sobre finanças..."):
+    st.chat_message("user").write(pergunta)
+    st.session_state.messages.append({"role": "user", "content": pergunta})
+
+    with st.spinner(f"Sophia pensando..."):
+        resposta = perguntar(pergunta)
+        st.chat_message("assistant").write(resposta)
+        st.session_state.messages.append({"role": "assistant", "content": resposta})
+
